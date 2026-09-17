@@ -22,8 +22,13 @@ contract FundingReaderForkTest is Test {
     uint256 constant FEB_A = 101129229;
     uint256 constant FEB_B = 101137800;
 
+    /// Forks at HEAD, not a pinned block. The public Monad RPC is not an
+    /// archive node, and pinning would demand historical *state*. It isn't
+    /// needed: getFundingSumAtBlock is a lookup inside the exchange's own
+    /// storage, so every assertion below stays reproducible from the latest
+    /// block indefinitely — no archive node, no API key.
     function setUp() public {
-        vm.createSelectFork(vm.rpcUrl("monad"), 102579854);
+        vm.createSelectFork(vm.rpcUrl("monad"));
     }
 
     function test_FundingIntervalIsDocumentedValue() public view {
