@@ -28,7 +28,7 @@ view call, callable by anyone, at any time after expiry.
 
 | | |
 |---|---|
-| **PremiaSwap** | **`0x4695e7747555857929CA99FC86A9F44cef832749`** (verified on Sourcify) ([deploy tx](https://app.blocksec.com/phalcon/explorer/tx/monad/0x5c2da79f4bfd1af8cff762345e0382638b0c9e8747bc5c07aa2470a29374aec5)) |
+| **PremiaSwap** | **`0x4695e7747555857929CA99FC86A9F44cef832749`** (verified on Sourcify) ([deploy tx](https://monadscan.com/tx/0x5c2da79f4bfd1af8cff762345e0382638b0c9e8747bc5c07aa2470a29374aec5)) |
 | Perpl proxy | `0x34B6552d57a35a1D042CcAe1951BD1C370112a6F` |
 | Implementation | `0xf7df187620c81deee0833589509f41f95886cd33` |
 | Chain | Monad mainnet, id 143 |
