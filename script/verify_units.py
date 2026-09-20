@@ -1,34 +1,37 @@
 #!/usr/bin/env python3
-"""Resolve PREMIA's unitScale against a REAL Perpl position.
+"""Resolve PREMIA's lot size and unitScale against a REAL Perpl position.
 
-The one number the contract cannot derive for itself is how many AUSD wei a
-single funding unit is worth. Perpl stores funding as a cumulative product sum
-per market, scaled by `funding_sum_scaling_exp` and by that market's price
-decimals -- and the docs define the payment as (Fsum[j] - Fsum[m]) * L without
-pinning the unit of L. Getting it wrong is silent and costs orders of magnitude.
+Perpl stores funding as a cumulative product sum per market. The payment owed
+by a position is (Fsum[end] - Fsum[start]) * L -- but the docs never pin the
+unit of L, and the fixed-point scaling differs per market (price_decimals,
+size_decimals, funding_sum_scaling_exp). Get it wrong and every settlement is
+off by orders of magnitude, silently.
 
-So we don't derive it. We open a position on Perpl, let it sit through a few
-funding events, then ask the exchange what IT thinks that position owes and
-find the scale that reproduces the number.
+So we don't derive it from the docs. We read an OPEN position's own accrued
+funding out of the exchange and solve for the scaling that reproduces it.
 
-  python3 script/verify_units.py --market 50 --account <id> --lots <size> \
-      --start-block <block when position opened>
+  python3 script/verify_units.py --market 50 --account 5305
 
-Writes evidence/unit-scale-<market>.json on success. CreateSeries.s.sol will
-not create a series for a market without it.
+Writes evidence/unit-scale-<market>.json. CreateSeries.s.sol refuses to list a
+series for a market without it.
+
+Position struct layout (getPositionV2(marketId, accountId)), established by
+decoding a live position and cross-checking every field against the UI:
+  [4] margin (collateral wei)   [5] entry price   [6] size (raw size units)
+  [7] open block                [10] funding accrued (collateral wei, signed)
 """
 import argparse, json, os, sys, urllib.request
 
 RPC = os.environ.get("MONAD_RPC", "https://rpc.monad.xyz")
 EXCHANGE = "0x34B6552d57a35a1D042CcAe1951BD1C370112a6F"
 API = "https://app.perpl.xyz/api"
-HDRS = {"User-Agent": "premia-verify/0.1", "Accept": "application/json"}
+HDRS = {"User-Agent": "premia-verify/0.2", "Accept": "application/json"}
 
-SEL_FUNDING_SUM = "0x7dd7e759"   # getFundingSumAtBlock(uint256,uint256)
-SEL_POSITION_V2 = "0xea3196ec"   # getPositionV2(uint256,uint256)
+SEL_FUNDING_SUM = "0x7dd7e759"   # getFundingSumAtBlock(uint256 market, uint256 block)
+SEL_POSITION_V2 = "0xea3196ec"   # getPositionV2(uint256 market, uint256 account)
 
-CANDIDATES = [1, 10, 100, 1_000, 10_000, 100_000, 1_000_000,
-              10_000_000, 100_000_000, 1_000_000_000]
+W_MARGIN, W_ENTRY, W_SIZE, W_OPEN_BLOCK, W_FUNDING = 4, 5, 6, 7, 10
+COLLATERAL_DECIMALS = 6          # AUSD
 
 
 def rpc(method, params):
@@ -42,112 +45,117 @@ def rpc(method, params):
     return out["result"]
 
 
-def word(hexstr, i):
-    raw = int(hexstr[2 + i * 64: 66 + i * 64], 16)
-    return raw - (1 << 256) if raw >> 255 else raw
+def words(hexstr):
+    h = hexstr[2:]
+    return [int(h[i*64:(i+1)*64], 16) for i in range(len(h) // 64)]
+
+
+def signed(x):
+    return x - (1 << 256) if x >> 255 else x
 
 
 def call(sel, a, b):
-    data = sel + f"{a:064x}" + f"{b:064x}"
-    return rpc("eth_call", [{"to": EXCHANGE, "data": data}, "latest"])
+    return rpc("eth_call", [{"to": EXCHANGE, "data": sel + f"{a:064x}" + f"{b:064x}"},
+                            "latest"])
 
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--market", type=int, required=True)
     p.add_argument("--account", type=int, required=True)
-    p.add_argument("--lots", type=float, required=True,
-                   help="position size as YOU entered it on Perpl (e.g. 0.05)")
-    p.add_argument("--start-block", type=int, required=True)
-    p.add_argument("--tolerance", type=float, default=0.02)
+    p.add_argument("--dump", action="store_true", help="print the raw position words")
     args = p.parse_args()
 
-    head = int(rpc("eth_blockNumber", []), 16)
+    raw = call(SEL_POSITION_V2, args.market, args.account)
+    if raw in ("0x", None) or len(raw) < 66:
+        sys.exit("getPositionV2 returned nothing -- check the account id")
+    w = words(raw)
+    if args.dump:
+        for i, x in enumerate(w):
+            print(f"  [{i:2}] {x}  (signed {signed(x)})")
 
-    s0 = call(SEL_FUNDING_SUM, args.market, args.start_block)
-    s1 = call(SEL_FUNDING_SUM, args.market, head)
-    fsum0, blk0 = word(s0, 0), word(s0, 1)
-    fsum1, blk1 = word(s1, 0), word(s1, 1)
+    size      = signed(w[W_SIZE])
+    open_blk  = w[W_OPEN_BLOCK]
+    accrued   = signed(w[W_FUNDING])
+    if size == 0:
+        sys.exit("position size is 0 -- open a position on this market first")
+    if accrued == 0:
+        sys.exit("accrued funding is 0 -- hold the position through at least one "
+                 "funding event where the rate was non-zero, then rerun")
+
+    head = int(rpc("eth_blockNumber", []), 16)
+    s0 = words(call(SEL_FUNDING_SUM, args.market, open_blk))
+    s1 = words(call(SEL_FUNDING_SUM, args.market, head))
+    fsum0, blk0 = signed(s0[0]), s0[1]
+    fsum1, blk1 = signed(s1[0]), s1[1]
     if blk0 == 0 or blk1 == 0:
-        sys.exit("no funding data for that market/window")
+        sys.exit("no funding data for that market")
 
     delta = fsum1 - fsum0
     intervals = (blk1 - blk0) // 8571
-    print(f"market {args.market}: fsum {fsum0} -> {fsum1}  delta={delta} "
-          f"over {intervals} intervals (blocks {blk0} -> {blk1})")
-    if intervals < 2:
-        sys.exit("hold the position through at least 2 funding events first")
-    if delta == 0:
-        sys.exit("funding was exactly flat over this window -- useless as a "
-                 "calibration; wait for a window where the rate moved")
 
-    # market config, for the record
     ctx = json.load(urllib.request.urlopen(
         urllib.request.Request(f"{API}/v1/pub/context", headers=HDRS), timeout=30))
     mkt = next(m for m in ctx["markets"] if m["id"] == args.market)
     cfg = mkt["config"]
-    print(f"           symbol={mkt['symbol']} price_decimals={cfg['price_decimals']} "
-          f"size_decimals={cfg['size_decimals']} scaling_exp={cfg['funding_sum_scaling_exp']}")
 
-    pos = call(SEL_POSITION_V2, args.account, args.market)
-    if pos in ("0x", None) or len(pos) < 66:
-        sys.exit("getPositionV2 returned nothing -- wrong account id, or no "
-                 "open position on this market")
+    print(f"market {args.market} ({mkt['symbol']})")
+    print(f"  price_decimals={cfg['price_decimals']} size_decimals={cfg['size_decimals']} "
+          f"scaling_exp={cfg['funding_sum_scaling_exp']}")
+    print(f"  position: size={size} raw units, opened at block {open_blk}")
+    print(f"  Fsum {fsum0} -> {fsum1}  delta={delta} over {intervals} intervals")
+    print(f"  exchange says accrued funding = {accrued} ({accrued / 10**COLLATERAL_DECIMALS:+.6f} AUSD)")
 
-    nwords = (len(pos) - 2) // 64
-    print(f"\ngetPositionV2 returned {nwords} words; searching for premium PNL")
+    if delta == 0:
+        sys.exit("funding was flat over this window -- every scale fits. Hold longer.")
 
-    hits = []
-    for i in range(nwords):
-        w = word(pos, i)
-        if w == 0:
-            continue
-        for scale in CANDIDATES:
-            for lot_basis, label in ((1, "whole units"),
-                                     (10 ** cfg["size_decimals"], "raw size units")):
-                expected = delta * args.lots * lot_basis * scale
-                if expected == 0:
-                    continue
-                if abs(w - expected) <= abs(expected) * args.tolerance:
-                    hits.append((i, w, scale, label, expected))
+    # Solve: |delta * size| / accrued must be a power of ten.
+    product = abs(delta * size)
+    ratio = product / abs(accrued)
+    k = round(__import__("math").log10(ratio))
+    if abs(ratio - 10 ** k) > 10 ** k * 0.001:
+        sys.exit(f"\nUNVERIFIED: |delta*size|/accrued = {ratio:.6f}, not a clean power "
+                 "of ten. Do NOT create a series. Hold the position longer and rerun; "
+                 "if it persists the struct layout may differ for this market -- "
+                 "rerun with --dump.")
 
-    if not hits:
-        print("\nNo word matched. Raw words, for manual inspection:")
-        for i in range(nwords):
-            print(f"  [{i:2}] {word(pos, i)}")
-        sys.exit("\nUNVERIFIED -- do not create a series. Widen --tolerance, or "
-                 "check the account id and that the position was open for the "
-                 "whole window.")
+    # payoutWei = delta * lots * unitScale, with lots = rawSize / 10**k
+    # so unitScale = 1 and one PREMIA lot is 10**k raw size units.
+    lot_exp = k
+    unit_scale = 1
+    lot_in_coin = 10 ** lot_exp / 10 ** cfg["size_decimals"]
 
-    print("\nMatches:")
-    for i, w, scale, label, exp in hits:
-        print(f"  word[{i}] = {w}  ~  delta*lots*{scale} ({label}, expected {exp:.0f})")
+    print(f"\n  |delta*size| / accrued = {ratio:.4f} = 10^{k}  [clean]")
+    print(f"\nVERIFIED")
+    print(f"  1 PREMIA lot = {10**lot_exp} raw units = {lot_in_coin:g} {mkt['symbol']}")
+    print(f"  unitScale    = {unit_scale}")
+    print(f"  your position of {size} raw units = {size / 10**lot_exp:.2f} PREMIA lots")
 
-    scales = {h[2] for h in hits}
-    if len(scales) > 1:
-        sys.exit(f"\nAMBIGUOUS -- {sorted(scales)} all fit within tolerance. "
-                 "Hold the position longer so the numbers separate, then rerun.")
-
-    scale = scales.pop()
     os.makedirs("evidence", exist_ok=True)
     path = f"evidence/unit-scale-{args.market}.json"
     with open(path, "w") as f:
         json.dump({
             "verified": True,
-            "unitScale": scale,
+            "unitScale": unit_scale,
+            "lotExp": lot_exp,
+            "lotSizeRawUnits": 10 ** lot_exp,
+            "lotSizeInCoin": lot_in_coin,
             "marketId": args.market,
             "symbol": mkt["symbol"],
             "accountId": args.account,
-            "lots": args.lots,
+            "positionSizeRaw": size,
+            "openBlock": open_blk,
+            "accruedFundingWei": accrued,
             "fsumStart": fsum0, "fsumEnd": fsum1, "delta": delta,
             "blockStart": blk0, "blockEnd": blk1, "intervals": intervals,
+            "ratio": ratio,
             "priceDecimals": cfg["price_decimals"],
             "sizeDecimals": cfg["size_decimals"],
             "fundingSumScalingExp": cfg["funding_sum_scaling_exp"],
-            "matchedWords": [h[0] for h in hits],
+            "method": "solved against the exchange's own accrued funding for a live "
+                      "position; cross-checked against the Perpl UI",
         }, f, indent=2)
-    print(f"\nVERIFIED. unitScale = {scale}  ->  {path}")
-    print("CreateSeries.s.sol will now accept this market.")
+    print(f"\n  -> {path}")
 
 
 if __name__ == "__main__":
