@@ -6,6 +6,8 @@ libs = ["lib"]
 solc = "0.8.30"
 optimizer = true
 optimizer_runs = 200
+# CreateSeries.s.sol reads the verified unit scale before listing a series.
+fs_permissions = [{ access = "read", path = "./evidence" }]
 
 [rpc_endpoints]
 monad = "https://rpc.monad.xyz"
