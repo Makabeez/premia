@@ -18,3 +18,33 @@ measured median. Escrow 250,000 wei ($0.25) per side.
 REAL / SIMULATED: everything above is real mainnet. Both sides of this fill came
 from the same wallet — it validates the mechanism, it is not traction. Recorded
 fills for the submission use distinct counterparties.
+
+## Settlement (26 Sept 2026)
+
+Settled 1,426,004 blocks (~119 h) after `endBlock`, by design: the funding
+sum is read historically, so a late `settle()` returns the same answer as
+a punctual one.
+
+| step   | tx |
+|--------|----|
+| settle | [0x86d82d86…711c](https://app.blocksec.com/phalcon/explorer/tx/monad/0x86d82d8615146f20e76af4ae84a7fbf28245654ac62232b8efb98699b803711c) — block 108287067 |
+| claim  | [0xddaacf8f…98fd](https://app.blocksec.com/phalcon/explorer/tx/monad/0xddaacf8fb90c0a0f2e8a57e18f1f10cd6b8c0b4d589641d7b980a4163db798fd) — block 108287211 |
+
+**Settled(0, netPerLot = -1694, intervals = 33)**
+
+- Fsum[ZEC] @106571814 = 235338, @106854657 = 233644 → floating leg −1694 per lot
+- 33 intervals counted from Perpl's recorded funding-event blocks, matching the 33 listed
+- Fixed leg: K = 68 × 33 = 2244 → net −3938 per lot (16% of the ±25000 cap)
+- Per lot: PayFixed 21062, ReceiveFixed 28938 (sum 50000 = 2 × cap)
+- 10 lots → PayFixed 0.210620 AUSD, ReceiveFixed 0.289380 AUSD
+- **ReceiveFixed wins**: realised ZEC funding came in below the 68/interval fixed rate
+
+Claim paid 500000 raw units (0.500000 AUSD) to the single wallet holding both
+sides. Contract AUSD balance after claim: **0**. The pot drained exactly.
+
+Anyone can reproduce the settlement number with two view calls, no archive node needed:
+
+    cast call 0x34B6552d57a35a1D042CcAe1951BD1C370112a6F \
+      "getFundingSumAtBlock(uint256,uint256)(int256,uint256)" 50 106578220 --rpc-url https://rpc.monad.xyz
+    cast call 0x34B6552d57a35a1D042CcAe1951BD1C370112a6F \
+      "getFundingSumAtBlock(uint256,uint256)(int256,uint256)" 50 106861063 --rpc-url https://rpc.monad.xyz
