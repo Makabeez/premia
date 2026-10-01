@@ -50,6 +50,7 @@ with the same answer.
 | Series 0: full lifecycle, settled **5 days late** with an identical result, pot drained to exactly 0 | [`evidence/series-0.md`](evidence/series-0.md) · [settle](https://app.blocksec.com/phalcon/explorer/tx/monad/0x86d82d8615146f20e76af4ae84a7fbf28245654ac62232b8efb98699b803711c) · [claim](https://app.blocksec.com/phalcon/explorer/tx/monad/0xddaacf8fb90c0a0f2e8a57e18f1f10cd6b8c0b4d589641d7b980a4163db798fd) |
 | Series 1: first hedge signed by a passkey wallet from a phone | [`evidence/series-1.md`](evidence/series-1.md) · [take](https://app.blocksec.com/phalcon/explorer/tx/monad/0x244572a6be0603672b3fc1b8b674566c20dc667842cb9e481cd8bd9af0315ceb) |
 | **One tap: long 0.01 ZEC on Perpl + lock its funding**, 4 txs in 4 consecutive blocks | [`evidence/one-tap-hedge.md`](evidence/one-tap-hedge.md) · [perp](https://app.blocksec.com/phalcon/explorer/tx/monad/0x543165d15ac738939f1dcaacab6a00f3e39b5725dee1eb947a339408244efe81) · [hedge](https://app.blocksec.com/phalcon/explorer/tx/monad/0xf741cefc9bb776669dec14e6f19e429b29a3e694ca0f71ba6014e8f4713a5d34) |
+| **Series 1 settled: funding fell from −336 to −74, the hedged long still earned exactly the locked 336 × 33** | [`evidence/series-1-settlement.md`](evidence/series-1-settlement.md) · [settle](https://app.blocksec.com/phalcon/explorer/tx/monad/0xfe9a1bbf21db9e7a7c2eb478bc8789bdfa895007ce982c27c58ca3fdc44419d7) · [claim from phone](https://app.blocksec.com/phalcon/explorer/tx/monad/0xc5686857c72e015c69ae47f10e1675b4f9089a57f2e823e361e6f7b1fedc8208) |
 | Unit scale measured against a live Perpl position, not assumed | [`evidence/unit-scale-50.json`](evidence/unit-scale-50.json) (1 lot = 0.01 ZEC, ratio 100.0007) |
 
 ### Real vs simulated
@@ -137,6 +138,10 @@ The fork tests fork at HEAD and pass historical blocks as arguments, so they nee
   make it atomic.
 - **ZEC only.** HYPE and MON were picked by the backtest, but neither has a measured unit scale
   or a series yet, and the perp leg is wired for ZEC.
+- **Unfilled quotes are stranded after trading closes.** `cancelQuote` reverts after `startBlock` and
+  `claim` pays fills only, so 0.12 AUSD of unfilled maker escrow in series 1 is stuck. Fix: refund
+  live quotes in `claim`. Found on mainnet, documented rather than hidden.
+- PREMIA hedges **funding, not price**: the perp's price move is the trader's own risk.
 - Payoffs are **clamped at ±cap**: an extreme funding run beyond the cap is truncated, by design.
 
 ## Attribution
