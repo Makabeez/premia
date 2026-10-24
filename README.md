@@ -51,6 +51,8 @@ with the same answer.
 | Series 1: first hedge signed by a passkey wallet from a phone | [`evidence/series-1.md`](evidence/series-1.md) · [take](https://app.blocksec.com/phalcon/explorer/tx/monad/0x244572a6be0603672b3fc1b8b674566c20dc667842cb9e481cd8bd9af0315ceb) |
 | **One tap: long 0.01 ZEC on Perpl + lock its funding**, 4 txs in 4 consecutive blocks | [`evidence/one-tap-hedge.md`](evidence/one-tap-hedge.md) · [perp](https://app.blocksec.com/phalcon/explorer/tx/monad/0x543165d15ac738939f1dcaacab6a00f3e39b5725dee1eb947a339408244efe81) · [hedge](https://app.blocksec.com/phalcon/explorer/tx/monad/0xf741cefc9bb776669dec14e6f19e429b29a3e694ca0f71ba6014e8f4713a5d34) |
 | **Series 1 settled: funding fell from −336 to −74, the hedged long still earned exactly the locked 336 × 33** | [`evidence/series-1-settlement.md`](evidence/series-1-settlement.md) · [settle](https://app.blocksec.com/phalcon/explorer/tx/monad/0xfe9a1bbf21db9e7a7c2eb478bc8789bdfa895007ce982c27c58ca3fdc44419d7) · [claim from phone](https://app.blocksec.com/phalcon/explorer/tx/monad/0xc5686857c72e015c69ae47f10e1675b4f9089a57f2e823e361e6f7b1fedc8208) |
+| **Series 2 one tap on video: empty Perpl account topped up, long opened, funding locked**, 4 txs in ~2 s | [`evidence/series-2-mobile-hedge.md`](evidence/series-2-mobile-hedge.md) · [video](https://youtube.com/shorts/nr0ALj4d1-o) · [hedge](https://monadvision.com/tx/0x0b622301b0dbab7648809014584efa1279d0e686727f290291e3281fa38814dd) |
+| **Series 2 settled: funding beat the locked rate (−149 vs −120), the hedged long still earned exactly 120 × 33** | [`evidence/series-2-settlement.md`](evidence/series-2-settlement.md) · [settle](https://monadvision.com/tx/0xfcf61caf5e60c21dd297d726a4fbefa6fd504348e6bfaa0caceac085c0f98b79) · [claim from phone](https://monadvision.com/tx/0xc45cdcde6e89dc3e30d92f0ea5042d962a8545bea358a8f3c86dcdc5a4e88422) |
 | Unit scale measured against a live Perpl position, not assumed | [`evidence/unit-scale-50.json`](evidence/unit-scale-50.json) (1 lot = 0.01 ZEC, ratio 100.0007) |
 
 ### Real vs simulated
@@ -139,7 +141,7 @@ The fork tests fork at HEAD and pass historical blocks as arguments, so they nee
 - **ZEC only.** HYPE and MON were picked by the backtest, but neither has a measured unit scale
   or a series yet, and the perp leg is wired for ZEC.
 - **Unfilled quotes are stranded after trading closes.** `cancelQuote` reverts after `startBlock` and
-  `claim` pays fills only, so 0.12 AUSD of unfilled maker escrow in series 1 is stuck. Fix: refund
+  `claim` pays fills only, so unfilled maker escrow is stuck (0.12 AUSD in series 1, 0.08 AUSD in series 2). Fix: refund
   live quotes in `claim`. Found on mainnet, documented rather than hidden.
 - PREMIA hedges **funding, not price**: the perp's price move is the trader's own risk.
 - Payoffs are **clamped at ±cap**: an extreme funding run beyond the cap is truncated, by design.
